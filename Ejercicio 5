@@ -1,0 +1,41 @@
+-- 5.Filtrando las órdenes conrmadas, calcular a nivel usuario el porcentaje de órdenes confirmadas, que
+tienen entre los “Top 100” restaurantes (según cantidad de órdenes confirmadas)
+
+WITH top_100_restaurants AS (
+    SELECT 
+        r.restaurant_id,
+        COUNT(o.id) AS confirmed_orders_qty
+    FROM 
+        orders_sample o
+    JOIN 
+        restaurant_sample r ON o.restaurant_id = r.restaurant_id
+    WHERE 
+        o.state = 'CONFIRMED'
+    GROUP BY 
+        r.restaurant_id
+    ORDER BY 
+        confirmed_orders_qty DESC
+    LIMIT 100 
+),
+user_orders AS (
+    SELECT 
+        o.user_id,
+        COUNT(CASE WHEN o.state = 'CONFIRMED' THEN 1 END) AS conf_orders,
+        COUNT(CASE WHEN o.state = 'CONFIRMED' AND o.restaurant_id IN (
+            SELECT restaurant_id FROM top_100_restaurants
+        ) THEN 1 END) AS conf_orders_top_100_rest
+    FROM 
+        orders_sample o
+    GROUP BY 
+        o.user_id
+)
+SELECT 
+    user_id,
+    conf_orders,
+    conf_orders_top_100_rest,
+    ROUND((CAST(conf_orders_top_100_rest AS FLOAT) / conf_orders) * 100, 2) AS ratio_con_orders_top_100
+FROM 
+    user_orders
+WHERE 
+    conf_orders >= 1
+order by conf_orders_top_100_rest DESC;
