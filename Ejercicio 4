@@ -1,0 +1,15 @@
+-- 4.Tiempo de entrega promedio (en min) en marzo de 2019, por país.
+(Tiempo de entrega: esla diferencia entre el delivered_date y order_date.)
+
+SELECT 
+    c.country_name,
+    AVG((JULIANDAY(o.delivery_date) - JULIANDAY(o.order_date)) * 1440) AS avg_delivery_time_minutes -- Paso tiempo día a minutos calculando por 1.440 (24 hs x 60 min)
+FROM 
+    cities_sample c
+INNER JOIN 
+    orders_sample o ON c.city_id = o.city_id
+WHERE 
+    strftime('%Y-%m', o.delivery_date) = '2019-03'
+GROUP BY 
+    c.country_name
+order by avg_delivery_time_minutes asc;
