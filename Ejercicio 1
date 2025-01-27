@@ -1,0 +1,22 @@
+1.Cantidad de órdenes y monto total de las mismas (local y en dólares), por ciudad, país y año-mes.
+
+SELECT 
+    c.country_name,
+    o.city_name,
+      strftime('%Y%m', o.order_date) AS yearmonth, -- Extraemos yearmonth del order_date
+    COUNT(DISTINCT o.id) AS orders_qty,
+    SUM(o.amount_local_currency) AS orders_amount_local,
+    ROUND(SUM(COALESCE(o.amount_local_currency, 0) / COALESCE(cu.rate_us, 1)), 0) AS orders_amount_usd -- Redondeamos correctamente
+FROM orders_sample o
+LEFT JOIN cities_sample c 
+    ON o.city_id = c.city_id
+LEFT JOIN country_currency_map cc 
+    ON c.country_id = cc.country_id
+LEFT JOIN currency cu 
+    ON cc.currency_id = cu.currency_id 
+    AND strftime('%Y%m', o.order_date) = strftime('%Y%m', cu.currency_exchange_date) -- Matcheamos yearmonth de ambas tablas
+GROUP BY 
+    c.country_name
+    o.city_name, 
+    yearmonth
+;
