@@ -1,0 +1,184 @@
+1.Cantidad de órdenes y monto total de las mismas (local y en dólares), por ciudad, país y año-mes.
+
+SELECT 
+    c.country_name,
+    o.city_name,
+      strftime('%Y%m', o.order_date) AS yearmonth, -- Extraemos yearmonth del order_date
+    COUNT(DISTINCT o.id) AS orders_qty,
+    SUM(o.amount_local_currency) AS orders_amount_local,
+    ROUND(SUM(COALESCE(o.amount_local_currency, 0) / COALESCE(cu.rate_us, 1)), 0) AS orders_amount_usd
+FROM orders_sample o
+LEFT JOIN cities_sample c 
+    ON o.city_id = c.city_id
+LEFT JOIN country_currency_map cc 
+    ON c.country_id = cc.country_id
+LEFT JOIN currency cu 
+    ON cc.currency_id = cu.currency_id 
+    AND strftime('%Y%m', o.order_date) = strftime('%Y%m', cu.currency_exchange_date)
+GROUP BY 
+    c.country_name
+    o.city_name, 
+    yearmonth
+;
+
+-- 2.Cantidad de restaurantes en Uruguay, por categoría del restaurante, que tienen por lo menos un monto
+mensual (amount_local_currency)) en marzo 2019 mayor a 100.
+
+SELECT 
+    r.restaurant_type_name AS Category,
+    COUNT(DISTINCT r.restaurant_id) AS restaurant_qty
+FROM orders_sample o
+INNER JOIN restaurant_sample r 
+    ON o.restaurant_id = r.restaurant_id
+JOIN cities_sample c 
+    ON o.city_id = c.city_id -- Traigo la tabla de ciudades para tener el filtro de país
+WHERE c.country_name = 'Uruguay' -- Filtro solo Uruguay
+  AND strftime('%Y-%m', o.order_date) = '2019-03' -- Filtro solo pedidos de marzo 2019
+  and restaurant_type_name <> 'Pharmacy' -- Filtro Pharmacy porque no corresponde a un restaurante sino a otro rubro.
+GROUP BY r.restaurant_type_name 
+HAVING MAX(o.amount_local_currency) > 100  -- Al menos un monto mayor a 100 mensual en moneda local. Uso Max porque se hace en contexto de Having y no uso SUM porque me traeria la suma de transacciones de cada categoria
+ORDER BY restaurant_qty DESC; -- Ordeno cantidad de restaurants de mayor a menor.
+
+-- 3.Usando todas las órdenes en la base, calcular el promedio de días entre una orden y la siguiente a nivel
+usuario, solo para usuarios con al menos 5 órdenes totales. De ese resultado, quedarse solo con usuarios con
+un promedio mayor a 5 días.
+
+WITH user_orders AS (
+    -- Obtener las órdenes de cada usuario, ordenadas por fecha
+    SELECT 
+        user_id,
+        order_date,
+        LAG(order_date) OVER (PARTITION BY user_id ORDER BY order_date) AS prev_order_date
+    FROM orders_sample
+),
+days_between_orders AS (
+    -- Calcular la diferencia en días entre órdenes consecutivas
+    SELECT 
+        user_id,
+        JULIANDAY(order_date) - JULIANDAY(prev_order_date) AS days_diff
+    FROM user_orders
+    WHERE prev_order_date IS NOT NULL -- Excluir la primera orden que no tiene una anterior
+),
+user_avg_days AS (
+    -- Calcular el promedio de días entre órdenes y contar el total de órdenes por usuario
+    SELECT 
+        user_id,
+        AVG(days_diff) AS avg_days_between_orders,
+        COUNT(*) + 1 AS total_orders -- Contar todas las órdenes (incluyendo la primera)
+    FROM days_between_orders
+    GROUP BY user_id
+),
+filtered_users AS (
+    -- Filtrar usuarios con al menos 5 órdenes totales
+    SELECT 
+        user_id,
+        avg_days_between_orders,
+        total_orders
+    FROM user_avg_days
+    WHERE total_orders >= 5 -- Al menos 5 órdenes
+)
+-- Filtrar usuarios con un promedio de días mayor a 5
+SELECT 
+    user_id,
+    total_orders,
+    ROUND(avg_days_between_orders, 2) AS avg_days_between_orders
+FROM filtered_users
+WHERE avg_days_between_orders > 5;
+
+-- 4.Tiempo de entrega promedio (en min) en marzo de 2019, por país.
+(Tiempo de entrega: esla diferencia entre el delivered_date y order_date.)
+
+SELECT 
+    c.country_name,
+    AVG((JULIANDAY(o.delivery_date) - JULIANDAY(o.order_date)) * 1440) AS avg_delivery_time_minutes -- Paso tiempo día a minutos calculando por 1.440 (24 hs x 60 min)
+FROM 
+    cities_sample c
+INNER JOIN 
+    orders_sample o ON c.city_id = o.city_id
+WHERE 
+    strftime('%Y-%m', o.delivery_date) = '2019-03'
+GROUP BY 
+    c.country_name
+order by avg_delivery_time_minutes asc;
+
+-- 5.Filtrando las órdenes conrmadas, calcular a nivel usuario el porcentaje de órdenes confirmadas, que
+tienen entre los “Top 100” restaurantes (según cantidad de órdenes confirmadas)
+
+WITH top_100_restaurants AS (
+    SELECT 
+        r.restaurant_id,
+        COUNT(o.id) AS confirmed_orders_qty
+    FROM 
+        orders_sample o
+    JOIN 
+        restaurant_sample r ON o.restaurant_id = r.restaurant_id
+    WHERE 
+        o.state = 'CONFIRMED'
+    GROUP BY 
+        r.restaurant_id
+    ORDER BY 
+        confirmed_orders_qty DESC
+    LIMIT 100 
+),
+user_orders AS (
+    SELECT 
+        o.user_id,
+        COUNT(CASE WHEN o.state = 'CONFIRMED' THEN 1 END) AS conf_orders,
+        COUNT(CASE WHEN o.state = 'CONFIRMED' AND o.restaurant_id IN (
+            SELECT restaurant_id FROM top_100_restaurants
+        ) THEN 1 END) AS conf_orders_top_100_rest
+    FROM 
+        orders_sample o
+    GROUP BY 
+        o.user_id
+)
+SELECT 
+    user_id,
+    conf_orders,
+    conf_orders_top_100_rest,
+    ROUND((CAST(conf_orders_top_100_rest AS FLOAT) / conf_orders) * 100, 2) AS ratio_con_orders_top_100
+FROM 
+    user_orders
+WHERE 
+    conf_orders >= 1
+order by conf_orders_top_100_rest DESC;
+
+-- 6.Filtrando los usuarios con órdenes confirmadas para enero 2019, retornar cuantos de ellos volvieron a comprar los
+meses siguientes. Para el mes inicial (enero de 2019), el valor que debe retornar es el total de los usuarios que hayan
+tenido alguna orden confirmada
+
+WITH confirmed_users_jan_2019 AS (
+    -- Filtrar los usuarios con órdenes confirmadas en enero de 2019
+    SELECT 
+        DISTINCT o.user_id
+    FROM 
+        orders_sample o
+    WHERE 
+        o.state = 'CONFIRMED' 
+        AND strftime('%Y-%m', o.order_date) = '2019-01'
+),
+monthly_user_purchases AS (
+    -- Contar cuántos de esos usuarios realizaron órdenes confirmadas cada mes
+    SELECT 
+        strftime('%Y-%m', o.order_date) AS cohort_month,
+        COUNT(DISTINCT o.user_id) AS returning_users,
+        '2019-01' AS month -- Columna fija para enero 2019
+    FROM 
+        orders_sample o
+    WHERE 
+        o.state = 'CONFIRMED'
+        AND o.user_id IN (
+            SELECT user_id FROM confirmed_users_jan_2019
+        )
+    GROUP BY 
+        cohort_month
+)
+-- Retornar los resultados con "month" fijo y cohort_month dinámico
+SELECT 
+    month,
+    cohort_month,
+    returning_users
+FROM 
+    monthly_user_purchases
+ORDER BY 
+    cohort_month;
