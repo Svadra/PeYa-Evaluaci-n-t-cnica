@@ -1,0 +1,45 @@
+-- 3.Usando todas las órdenes en la base, calcular el promedio de días entre una orden y la siguiente a nivel
+usuario, solo para usuarios con al menos 5 órdenes totales. De ese resultado, quedarse solo con usuarios con
+un promedio mayor a 5 días.
+
+WITH user_orders AS (
+    -- Obtener las órdenes de cada usuario, ordenadas por fecha
+    SELECT 
+        user_id,
+        order_date,
+        LAG(order_date) OVER (PARTITION BY user_id ORDER BY order_date) AS prev_order_date
+    FROM orders_sample
+),
+days_between_orders AS (
+    -- Calcular la diferencia en días entre órdenes consecutivas
+    SELECT 
+        user_id,
+        JULIANDAY(order_date) - JULIANDAY(prev_order_date) AS days_diff
+    FROM user_orders
+    WHERE prev_order_date IS NOT NULL -- Excluir la primera orden que no tiene una anterior
+),
+user_avg_days AS (
+    -- Calcular el promedio de días entre órdenes y contar el total de órdenes por usuario
+    SELECT 
+        user_id,
+        AVG(days_diff) AS avg_days_between_orders,
+        COUNT(*) + 1 AS total_orders -- Contar todas las órdenes (incluyendo la primera)
+    FROM days_between_orders
+    GROUP BY user_id
+),
+filtered_users AS (
+    -- Filtrar usuarios con al menos 5 órdenes totales
+    SELECT 
+        user_id,
+        avg_days_between_orders,
+        total_orders
+    FROM user_avg_days
+    WHERE total_orders >= 5 -- Al menos 5 órdenes
+)
+-- Filtrar usuarios con un promedio de días mayor a 5
+SELECT 
+    user_id,
+    total_orders,
+    ROUND(avg_days_between_orders, 2) AS avg_days_between_orders
+FROM filtered_users
+WHERE avg_days_between_orders > 5;
