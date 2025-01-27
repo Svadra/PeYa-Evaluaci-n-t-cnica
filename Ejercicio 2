@@ -1,0 +1,17 @@
+-- 2.Cantidad de restaurantes en Uruguay, por categoría del restaurante, que tienen por lo menos un monto
+mensual (amount_local_currency)) en marzo 2019 mayor a 100.
+
+SELECT 
+    r.restaurant_type_name AS Category,
+    COUNT(DISTINCT r.restaurant_id) AS restaurant_qty
+FROM orders_sample o
+INNER JOIN restaurant_sample r 
+    ON o.restaurant_id = r.restaurant_id
+JOIN cities_sample c 
+    ON o.city_id = c.city_id -- Traigo la tabla de ciudades para tener el filtro de país
+WHERE c.country_name = 'Uruguay' -- Filtro solo Uruguay
+  AND strftime('%Y-%m', o.order_date) = '2019-03' -- Filtro solo pedidos de marzo 2019
+  and restaurant_type_name <> 'Pharmacy' -- Filtro Pharmacy porque no corresponde a un restaurante sino a otro rubro.
+GROUP BY r.restaurant_type_name 
+HAVING MAX(o.amount_local_currency) > 100  -- Al menos un monto mayor a 100 mensual en moneda local. Uso Max porque se hace en contexto de Having y no uso SUM porque me traeria la suma de transacciones de cada categoria
+ORDER BY restaurant_qty DESC; -- Ordeno cantidad de restaurants de mayor a menor.
