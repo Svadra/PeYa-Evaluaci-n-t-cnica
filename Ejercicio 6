@@ -1,0 +1,39 @@
+-- 6.Filtrando los usuarios con órdenes confirmadas para enero 2019, retornar cuantos de ellos volvieron a comprar los
+meses siguientes. Para el mes inicial (enero de 2019), el valor que debe retornar es el total de los usuarios que hayan
+tenido alguna orden confirmada
+
+WITH confirmed_users_jan_2019 AS (
+    -- Filtrar los usuarios con órdenes confirmadas en enero de 2019
+    SELECT 
+        DISTINCT o.user_id
+    FROM 
+        orders_sample o
+    WHERE 
+        o.state = 'CONFIRMED' 
+        AND strftime('%Y-%m', o.order_date) = '2019-01'
+),
+monthly_user_purchases AS (
+    -- Contar cuántos de esos usuarios realizaron órdenes confirmadas cada mes
+    SELECT 
+        strftime('%Y-%m', o.order_date) AS cohort_month,
+        COUNT(DISTINCT o.user_id) AS returning_users,
+        '2019-01' AS month -- Columna fija para enero 2019
+    FROM 
+        orders_sample o
+    WHERE 
+        o.state = 'CONFIRMED'
+        AND o.user_id IN (
+            SELECT user_id FROM confirmed_users_jan_2019
+        )
+    GROUP BY 
+        cohort_month
+)
+-- Retornar los resultados con "month" fijo y cohort_month dinámico
+SELECT 
+    month,
+    cohort_month,
+    returning_users
+FROM 
+    monthly_user_purchases
+ORDER BY 
+    cohort_month;
